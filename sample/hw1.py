@@ -50,6 +50,7 @@ def lighten(img1, img2):
     """
     # TODO: Remove the placeholder return value and
     # write your own implementation
+    fakefakefake.test()
     return np.zeros_like(img1)
     
 def darken(img1, img2):
@@ -64,6 +65,7 @@ def darken(img1, img2):
     """
     # TODO: Remove the placeholder return value and
     # write your own implementation
+    fakefakefake.test()
     return np.zeros_like(img1)
     
 def glow(img1, img2):
@@ -78,6 +80,7 @@ def glow(img1, img2):
     """
     # TODO: Remove the placeholder return value and
     # write your own implementation
+    fakefakefake.test()
     return np.zeros_like(img1)
     
 def main():
