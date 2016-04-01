@@ -78,7 +78,7 @@ def glow(img1, img2):
     """
     # TODO: Remove the placeholder return value and
     # write your own implementation
-    return np.zeros_like(img1) 
+    return np.zeros_like(img1)
     
 def main():
     print 'Loading balloon image'

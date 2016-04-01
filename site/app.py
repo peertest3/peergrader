@@ -1,7 +1,7 @@
 import sys, logging
 from logging.handlers import RotatingFileHandler
 from requests_oauthlib import OAuth2Session
-from flask import Flask, request, redirect, session, url_for
+from flask import Flask, request, redirect, session, url_for, render_template, json
 from flask.json import jsonify
 from pymongo import MongoClient
 from travispy import TravisPy
@@ -22,8 +22,50 @@ SCOPES = ['read:org', 'user:email', 'repo_deployment', 'repo:status', 'write:rep
 HOMEWORK_REPO = 'chrisgtech/peergrader'
 
 @app.route('/')
+@app.route('/index')
 def root():
-    return app.send_static_file('index.html')
+    if session.get('username'):
+        return redirect(url_for('.github'))
+    return render_template('index.html')
+    
+@app.route('/dashboard')
+def dashboard():
+    if not session.get('username') or not session.get('fork'):
+        return redirect(url_for('.index'))
+    build, results = findbuild(session['fork'])
+    return results
+    return render_template('dashboard.html', username=session['username'], fork=session['fork'], build=build, results=results)
+    
+def findbuild(fork):
+    token = session['oauth_token']['access_token']
+    travis = TravisPy.github_auth(token)
+    builds = travis.builds(slug=fork, event_type='push')
+    if not builds:
+        return None, None
+    build = builds[0]
+    if not build.job_ids:
+        return None, None
+    jobid = build.job_ids[0]
+    job = travis.job(jobid)
+    logid = job.log_id
+    log = travis.log(logid)
+    logged = log.body
+    end = logged.rfind('}----------------------------------------------------------------------')
+    if end < 1:
+        return None, None
+    end += 1
+    start = logged.rfind('{"stats": {')
+    logged = logged[start:end]
+    results = json.loads(logged)
+    return build, results
+    
+@app.route('/about')
+def about():
+    return render_template('about.html')
+    
+@app.route('/contact')
+def contact():
+    return render_template('contact.html')
     
 @app.route('/github')
 def github():
@@ -36,11 +78,6 @@ def github():
     except:
         exc_type, exc_value, exc_traceback = sys.exc_info()
         return 'index: %s\n%s\n%s' % (exc_type, exc_value, exc_traceback)
-
-@app.route('/data')
-def names():
-    data = {"names": ["John", "Jacob", "Julie", "Jennifer"]}
-    return jsonify(data)
     
 @app.route('/authorize', methods=["GET"])
 def authorize():
@@ -56,17 +93,6 @@ def authorize():
     except:
         exc_type, exc_value, exc_traceback = sys.exc_info()
         return 'authorize: %s\n%s %s\n%s' % (exc_type, exc_value, requested, exc_traceback)
-    
-@app.route("/profile", methods=["GET"])
-def profile():
-    """Fetching a protected resource using an OAuth 2 token.
-    """
-    try:
-        github = OAuth2Session(secrets.CLIENT_ID, token=session['oauth_token'])
-        return jsonify(github.get('https://api.github.com/user').json()) 
-    except:
-        exc_type, exc_value, exc_traceback = sys.exc_info()
-        return 'profile: %s\n%s\n%s' % (exc_type, exc_value, exc_traceback)
         
 @app.route("/checkfork", methods=["GET"])
 def checkfork():
@@ -74,22 +100,30 @@ def checkfork():
         token = session['oauth_token']['access_token']
         github = Github(token)
         user = github.get_user()
+        session['username'] = user.login
+        if session.get('fork'):
+            return redirect(url_for('.checktravis'))
         repos = user.get_repos()
-        forked = False
+        forked = None
         for repo in repos:
             if not repo.fork:
                 continue
             parent = repo.parent.full_name
             if parent == HOMEWORK_REPO:
-                forked = True
+                forked = repo.full_name
                 break
         if forked:
-            return 'Fork already exists'
+            session['fork'] = forked
+            return redirect(url_for('.checktravis'))
         else:
-            return redirect(url_for('.dofork'))
+            return redirect(url_for('.askfork'))
     except:
         exc_type, exc_value, exc_traceback = sys.exc_info()
-        return 'forks: %s\n%s\n%s' % (exc_type, exc_value, exc_traceback)
+        return 'checkfork: %s\n%s\n%s' % (exc_type, exc_value, exc_traceback)
+    
+@app.route('/askfork')
+def askfork():
+    return render_template('askfork.html', username=session['username'])
         
 @app.route("/dofork", methods=["GET"])
 def dofork():
@@ -99,23 +133,36 @@ def dofork():
         user = github.get_user()
         repo = github.get_repo(HOMEWORK_REPO)
         fork = user.create_fork(repo)
-        output = 'Fork %s created from %s' % (fork.full_name, HOMEWORK_REPO)
-        return output
+        return redirect(url_for('.github'))
     except:
         exc_type, exc_value, exc_traceback = sys.exc_info()
         return 'dofork: %s\n%s\n%s' % (exc_type, exc_value, exc_traceback)
         
-@app.route("/travis", methods=["GET"])
-def travis():
+@app.route("/checktravis", methods=["GET"])
+def checktravis():
     try:
+        if not session.get('fork') or not session.get('username'):
+            return redirect(url_for('.github'))
         token = session['oauth_token']['access_token']
         travis = TravisPy.github_auth(token)
-        username = travis.user().login
+        username = session['username']
         repos = travis.repos(member=username)
-        return repos[0].slug
+        verified = False
+        for repo in repos:
+            if session['fork'].lower() == repo.slug.lower():
+                verified = True
+                break
+        if verified:
+            return redirect(url_for('.dashboard'))
+        else:
+            return redirect(url_for('.asktravis'))
     except:
         exc_type, exc_value, exc_traceback = sys.exc_info()
-        return 'travis: %s\n%s\n%s' % (exc_type, exc_value, exc_traceback)
+        return 'checktravis: %s\n%s\n%s' % (exc_type, exc_value, exc_traceback)
+    
+@app.route('/asktravis')
+def asktravis():
+    return render_template('asktravis.html', username=session['username'], fork=session['fork'])
 
 if __name__ == '__main__':
     app.run()
